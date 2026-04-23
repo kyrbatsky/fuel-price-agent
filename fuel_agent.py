@@ -24,29 +24,58 @@ FUEL_KEYS = {
 
 def fetch_prices(url):
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'uk-UA,uk;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
     }
-    response = requests.get(url, headers=headers, timeout=15)
+    session = requests.Session()
+    response = session.get(url, headers=headers, timeout=15)
     response.encoding = 'utf-8'
-    soup = BeautifulSoup(response.text, 'html.parser')
 
+    print(f"  HTTP status: {response.status_code}")
+    print(f"  Response length: {len(response.text)}")
+
+    soup = BeautifulSoup(response.text, 'html.parser')
     prices = {}
-    rows = soup.find_all('tr')
-    for row in rows:
-        cols = row.find_all('td')
-        if len(cols) >= 2:
-            fuel_cell = cols[0].get_text(strip=True)
-            price_cell = cols[1].get_text(strip=True)
-            for key, label in FUEL_KEYS.items():
-                if key in fuel_cell:
-                    clean = re.sub(r'[^\d.]', '', price_cell.replace(',', '.'))
-                    try:
-                        val = float(clean)
-                        if val > 10:  # фільтр від сміттєвих значень
-                            prices[label] = val
-                    except ValueError:
-                        pass
+
+    # Шукаємо таблицю з цінами
+    for table in soup.find_all('table'):
+        rows = table.find_all('tr')
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 2:
+                fuel_cell = cols[0].get_text(strip=True)
+                price_cell = cols[1].get_text(strip=True)
+                print(f"  Row: '{fuel_cell}' | '{price_cell}'")
+                for key, label in FUEL_KEYS.items():
+                    if key in fuel_cell:
+                        clean = re.sub(r'[^\d.]', '', price_cell.replace(',', '.'))
+                        try:
+                            val = float(clean)
+                            if val > 10:
+                                prices[label] = val
+                        except ValueError:
+                            pass
+
+    # Якщо таблиця не спрацювала — шукаємо патерн у тексті
+    if not prices:
+        text = soup.get_text()
+        print(f"  Fallback: searching in text ({len(text)} chars)")
+        for key, label in FUEL_KEYS.items():
+            pattern = rf'{re.escape(key)}[^\d]{{0,10}}(\d{{2,3}}[.,]\d{{1,2}})'
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    val = float(match.group(1).replace(',', '.'))
+                    if val > 10:
+                        prices[label] = val
+                        print(f"  Found via text: {label} = {val}")
+                except ValueError:
+                    pass
+
     return prices
 
 def load_history():
